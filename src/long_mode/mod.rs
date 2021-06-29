@@ -1974,7 +1974,7 @@ pub enum Opcode {
     XRESLDTRK,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Instruction {
     pub prefixes: Prefixes,
     modrm_rrr: RegSpec,
