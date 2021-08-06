@@ -640,7 +640,7 @@ impl OperandSpec {
 /// the behavior for non-`avx512` instructions is equivalent to `merge`.  `zero` is only useful in
 /// conjunction with a mask register, where bits specified in the mask register correspond to
 /// unmodified items in the instruction's desination.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum MergeMode {
     Merge,
     Zero,
@@ -655,7 +655,7 @@ impl From<bool> for MergeMode {
     }
 }
 /// an `avx512` custom rounding mode.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum SaeMode {
     RoundNearest,
     RoundDown,
