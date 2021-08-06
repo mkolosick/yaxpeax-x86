@@ -479,7 +479,7 @@ enum SizeCode {
 ///
 /// `Operand::Nothing` should be unreachable in practice; any such instructions should have an
 /// operand count of 0 (or at least one fewer than the `Nothing` operand's position).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Copy, Hash, Eq)]
 #[non_exhaustive]
 pub enum Operand {
     /// a sign-extended byte
