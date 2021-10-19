@@ -1406,6 +1406,8 @@ const MNEMONICS: &[&'static str] = &[
     "setssbsy",
     "clrssbsy",
     "rstorssp",
+    "endbr64",
+    "endbr32",
 
     // TDX
     "tdcall",
@@ -3233,6 +3235,8 @@ impl <T: fmt::Write, Y: YaxColors> Colorize<T, Y> for Opcode {
             Opcode::SETSSBSY |
             Opcode::CLRSSBSY |
             Opcode::RSTORSSP |
+            Opcode::ENDBR64 |
+            Opcode::ENDBR32 |
             Opcode::AESDEC |
             Opcode::AESDECLAST |
             Opcode::AESENC |
@@ -3285,6 +3289,8 @@ pub enum DisplayStyle {
     // ATT,
 }
 
+/// implementation of [`Display`](fmt::Display) that renders instructions using a specified display
+/// style.
 pub struct InstructionDisplayer<'instr> {
     pub(crate) instr: &'instr Instruction,
     pub(crate) style: DisplayStyle,
@@ -3344,13 +3350,53 @@ fn contextualize_intel<T: fmt::Write, Y: YaxColors>(instr: &Instruction, colors:
     out.write_str(instr.opcode.name())?;
 
     if instr.opcode == Opcode::XBEGIN {
-        return write!(out, " $+{}", colors.number(signed_i32_hex(instr.imm as i32)));
+        if (instr.imm as i32) >= 0 {
+            return write!(out, " $+{}", colors.number(signed_i32_hex(instr.imm as i32)));
+        } else {
+            return write!(out, " ${}", colors.number(signed_i32_hex(instr.imm as i32)));
+        }
     }
 
     if instr.operand_count > 0 {
         out.write_str(" ")?;
 
         let x = Operand::from_spec(instr, instr.operands[0]);
+
+        const RELATIVE_BRANCHES: [Opcode; 21] = [
+            Opcode::JMP, Opcode::JECXZ,
+            Opcode::LOOP, Opcode::LOOPZ, Opcode::LOOPNZ,
+            Opcode::JO, Opcode::JNO,
+            Opcode::JB, Opcode::JNB,
+            Opcode::JZ, Opcode::JNZ,
+            Opcode::JNA, Opcode::JA,
+            Opcode::JS, Opcode::JNS,
+            Opcode::JP, Opcode::JNP,
+            Opcode::JL, Opcode::JGE,
+            Opcode::JLE, Opcode::JG,
+        ];
+
+        if instr.operands[0] == OperandSpec::ImmI8 || instr.operands[0] == OperandSpec::ImmI32 {
+            if RELATIVE_BRANCHES.contains(&instr.opcode) {
+                return match x {
+                    Operand::ImmediateI8(rel) => {
+                        if rel >= 0 {
+                            write!(out, "$+{}", colors.number(signed_i32_hex(rel as i32)))
+                        } else {
+                            write!(out, "${}", colors.number(signed_i32_hex(rel as i32)))
+                        }
+                    }
+                    Operand::ImmediateI32(rel) => {
+                        if rel >= 0 {
+                            write!(out, "$+{}", colors.number(signed_i32_hex(rel)))
+                        } else {
+                            write!(out, "${}", colors.number(signed_i32_hex(rel)))
+                        }
+                    }
+                    _ => { unreachable!() }
+                };
+            }
+        }
+
         if x.is_memory() {
             out.write_str(MEM_SIZE_STRINGS[instr.mem_size as usize - 1])?;
             out.write_str(" ")?;
@@ -3436,7 +3482,7 @@ fn contextualize_intel<T: fmt::Write, Y: YaxColors>(instr: &Instruction, colors:
     Ok(())
 }
 
-fn contextualize_c<T: fmt::Write, Y: YaxColors>(instr: &Instruction, _colors: &Y, _address: u32, _context: Option<&NoContext>, out: &mut T) -> fmt::Result {
+fn contextualize_c<T: fmt::Write, Y: YaxColors>(instr: &Instruction, colors: &Y, _address: u32, _context: Option<&NoContext>, out: &mut T) -> fmt::Result {
     let mut brace_count = 0;
 
     let mut prefixed = false;
@@ -3479,6 +3525,26 @@ fn contextualize_c<T: fmt::Write, Y: YaxColors>(instr: &Instruction, _colors: &Y
             out.write_str(word_str)?;
             out.write_str(" { ")?;
             brace_count += 1;
+        }
+    }
+
+    fn write_jmp_operand<T: fmt::Write, Y: YaxColors>(op: Operand, colors: &Y, out: &mut T) -> fmt::Result {
+        match op {
+            Operand::ImmediateI8(rel) => {
+                if rel >= 0 {
+                    write!(out, "$+{}", colors.number(signed_i32_hex(rel as i32)))
+                } else {
+                    write!(out, "${}", colors.number(signed_i32_hex(rel as i32)))
+                }
+            }
+            Operand::ImmediateI32(rel) => {
+                if rel >= 0 {
+                    write!(out, "$+{}", colors.number(signed_i32_hex(rel)))
+                } else {
+                    write!(out, "${}", colors.number(signed_i32_hex(rel)))
+                }
+            }
+            _ => { unreachable!() }
         }
     }
 
@@ -3635,9 +3701,90 @@ fn contextualize_c<T: fmt::Write, Y: YaxColors>(instr: &Instruction, _colors: &Y
                 write!(out, "{}--", instr.operand(0))?;
             }
         }
+        Opcode::JMP => {
+            out.write_str("jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JECXZ => {
+            out.write_str("if ecx == 0 then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::LOOP => {
+            out.write_str("ecx--; if ecx != 0 then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::LOOPZ => {
+            out.write_str("ecx--; if ecx != 0 and zero(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::LOOPNZ => {
+            out.write_str("ecx--; if ecx != 0 and !zero(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JO => {
+            out.write_str("if _(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JNO => {
+            out.write_str("if _(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JB => {
+            out.write_str("if /* unsigned */ below(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JNB => {
+            out.write_str("if /* unsigned */ above_or_equal(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JZ => {
+            out.write_str("if zero(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JNZ => {
+            out.write_str("if !zero(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JNA => {
+            out.write_str("if /* unsigned */ below_or_equal(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JA => {
+            out.write_str("if /* unsigned */ above(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JS => {
+            out.write_str("if signed(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JNS => {
+            out.write_str("if !signed(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JP => {
+            out.write_str("if parity(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JNP => {
+            out.write_str("if !parity(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JL => {
+            out.write_str("if /* signed */ less(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JGE => {
+            out.write_str("if /* signed */ greater_or_equal(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
+        Opcode::JLE => {
+            out.write_str("if /* signed */ less_or_equal(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
         Opcode::JG => {
-            write!(out, "if greater(eflags) then jmp {}", instr.operand(0))?;
-        }
+            out.write_str("if /* signed */ greater(rflags) then jmp ")?;
+            write_jmp_operand(instr.operand(0), colors, out)?;
+        },
         Opcode::NOP => {
             write!(out, "nop")?;
         }

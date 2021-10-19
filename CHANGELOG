@@ -1,3 +1,52 @@
+## 1.1.1
+* support `endbr64` and `endbr32`
+  - these are interpretations of `nop` (`0f1e` wide nop), so the only issue
+  with for users <1.1.1 will be `yaxpeax-86` decoding `nop` instead.
+* export `InstructionDisplayer`
+  this fixes an issue where crate docs would have dead links for the return
+  value of public APIs. it also allows callers to write name of what
+  `display_with` returns in their code, which hopefully isn't too useful but
+  shouldn't be impossible.
+
+## 1.1.0
+
+* implement `AnnotatingDecoder` from `yaxpeax-arch=0.2.6` and later.
+  this is a relatively involved addition. for rustc reasons, there are several
+  additional `inline(always)` attributes applied to keep non-annotating decoder
+  calls yielding the same generated code (and performance) as before.
+
+  annotations are produced for much but not all of 16-, 32-, and 64-bit x86,
+  describing prefixes, opcodes, operand encoding, and for more common
+  instructions, operand encoding as well. descriptions provided are described
+  by the `FieldDescription` struct in all architectures. `id` generally matches
+  some kind of parse order for the instruction, typically the order that
+  `yaxpeax-x86` considers bit fields in decoding an instruction. prefixes will
+  have lower id than opcodes, opcodes will have lower id than operands,
+  immediates will have the highest id due to being last values read in an
+  instruction.
+
+  between prefixes, opcodes, and operands, "Boundary" field descriptions are
+  reported as a hint to library clients that a logical grouping of descriptions
+  has ended.
+
+* `pub const fn` builders for all general-purpose registers, segment registers, and ip/flags registers.
+  - this corrects a spotty and inconsistent set of builders filled in on-demand.
+* `DisplayStyle::Intel` now shows relative offsets as `$+0xXX`, rather than `0xXX`.
+  - this corrects an ambiguity with instructions like `jz 0x1234`, where `jz`
+    on x86 is _only_ relative branches, but the displayed syntax is ambiguous
+    about being a relative or absolute address.
+  - `DisplayStyle::Intel` is how `impl Display for Instruction` works, so
+    typical `Display` use is also fixed.
+* `push`, `pop`, `call`, and `ret` now report `mem_size` in all cases.
+  - earlier, these instructions only reported a `mem_size` if their operand was a memory access.
+  - for `call`, in 32- and 16-bit modes the reported memory size may describe
+    the *read*, not the corresponding write of pushing `{e}ip` to the stack.
+    documentation has been added to `mem_size` more specifically describing
+    this circumstance.
+* correct `rex.b` incorrectly applying to the `*ax` register - `4f91` is `xchg rax, r9`, not `xchg r8, r9`.
+* correct `nop` incorrectly ignoring `rex.b` - `4190` is `xchg rax, r8`, not `nop`.
+* `DisplayStyle::C` now has rules to nicely display `jCC`, `jmp`, `call`, `loop*`, and `j*cxz` instructions.
+
 ## 1.0.4
 
 in 64-, 32-, and 16-bit modes:
